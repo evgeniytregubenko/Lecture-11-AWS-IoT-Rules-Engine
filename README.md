@@ -160,7 +160,7 @@ FROM 'iot-course/Tregubenko/sensors/data'
 - `client_id` — MQTT Client ID.
 - `student` — значення `Tregubenko` з другого рівня топіка.
 
-**Виявлена та виправлена помилка:** початковий SQL використовував `cast(timestamp() AS String)`, але ключ `received_at` у DynamoDB має тип Number. Після заміни на `timestamp() AS received_at` записи почали надходити до таблиці. У DynamoDB підтверджено шість записів із температурою, вологістю та службовими полями.
+**Виявлена та виправлена помилка:** початковий SQL використовував `cast(timestamp() AS String)`, але ключ `received_at` у DynamoDB має тип Number. Невідповідність запиту була виявлена саме за допомогою логів помилок правила. Після заміни на `timestamp() AS received_at` записи почали надходити до таблиці. У DynamoDB підтверджено шість записів із температурою, вологістю та службовими полями.
 
 ![Записи телеметрії у DynamoDB](images/10_dynamodb_telemetry.png)
 
