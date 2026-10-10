@@ -1,0 +1,151 @@
+#include <Arduino.h>
+
+#include "config.h" // Підключення заголовочного файлу з конфігурацією пінів та параметрів проекту
+#include "sensors.h" // Підключення заголовочного файлу з функціями для роботи з сенсорами
+#include "button.h" // Підключення заголовочного файлу з функціями для роботи з кнопкою
+#include "mqtt_client.h" // Підключення заголовочного файлу з функціями для роботи з MQTT-клієнтом
+
+// ============================================================
+// ДАНІ ПРИСТРОЮ
+// ============================================================
+
+SensorData sensorData;
+
+// ============================================================
+// ТАЙМЕР ПУБЛІКАЦІЇ ДАНИХ
+// ============================================================
+
+unsigned long lastSensorPublishTime = 0;
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+    Serial.begin(115200); // Ініціалізація серійного порту для виводу повідомлень на комп'ютер з швидкістю 115200 бод
+
+    delay(500); // Затримка для стабілізації роботи серійного порту перед виводом повідомлень
+
+    Serial.println();
+    Serial.println("ESP32-A started"); 
+
+    // ========================================================
+    // ПОЧАТКОВИЙ СТАТУС ПРИСТРОЮ
+    // ========================================================
+
+    sensorData.statuscheck = STATUS_OK;
+
+    // ========================================================
+    // КНОПКИ
+    // ========================================================
+
+    initButton();  // Ініціалізація кнопки для ручного зчитування даних
+    initWiFiDisconnectButton(); // Ініціалізація кнопки для скидання Wi-Fi
+
+    // ========================================================
+    // СЕНСОРИ
+    // ========================================================
+
+    initSensors();
+
+    initMQTT(); // Ініціалізація MQTT-клієнта
+
+    // ============================================================
+    // WI-FI
+    // ============================================================
+
+    if (!connectWiFi()) { // Спроба підключення до Wi-Fi
+
+        sensorData.statuscheck |= STATUS_WIFI_ERR; // Встановлення біта помилки Wi-Fi
+
+        Serial.println("Continue working without Wi-Fi");
+
+    } else {
+
+        sensorData.statuscheck &= ~STATUS_WIFI_ERR; // Скидання біта помилки Wi-Fi
+
+        // ========================================================
+        // СИНХРОНІЗАЦІЯ ЧАСУ
+        // ========================================================
+
+        if (!syncTime()) {
+
+            sensorData.statuscheck |= STATUS_MQTT_ERR;
+
+            Serial.println("Time synchronization failed");
+            Serial.println("Continue working without MQTT");
+
+        } else {
+
+            // ====================================================
+            // MQTT
+            // ====================================================
+
+            if (!connectMQTT()) { // Спроба підключення до AWS IoT Core
+
+                sensorData.statuscheck |= STATUS_MQTT_ERR; // Встановлення біта помилки MQTT
+
+                Serial.println("Continue working without MQTT");
+
+            } else {
+
+                sensorData.statuscheck &= ~STATUS_MQTT_ERR; // Скидання біта помилки MQTT
+            }
+        }
+    }
+}
+
+void loop() {
+
+    wifiLoop(); // Обслуговування WI-FI-з'єднання
+    mqttLoop(); // Обслуговування MQTT-з'єднання
+
+    // ========================================================
+    // КНОПКА
+    // ========================================================
+
+    if (isButtonPressed()) {
+
+        Serial.println("Button pressed");
+
+        publishManualRead();
+    }
+
+    if (isWiFiDisconnectButtonPressed()) {
+
+    Serial.println("Wi-Fi Disconnect button pressed");
+
+    disconnectWiFi();
+    }
+
+    // ========================================================
+    // DHT22
+    // ========================================================
+
+    unsigned long currentTime = millis();
+
+    if ((currentTime - lastSensorPublishTime) >= SENSOR_INTERVAL) {
+
+        lastSensorPublishTime = currentTime; // Запам'ятовуємо час останнього зчитування
+
+        sensorData.timestamp = currentTime; // Записуємо час зчитування даних
+
+        if (readDHT(sensorData.dht)) { // Зчитування DHT22
+
+            // status |= MASK;    встановити біт
+            // status &= ~MASK;   скинути біт
+
+            sensorData.statuscheck &= ~STATUS_DHT_ERR; // Скидаємо біт помилки DHT22 
+
+            publishSensorData(sensorData); // Публікація даних через MQTT
+
+        } else {
+
+            sensorData.statuscheck |= STATUS_DHT_ERR; // Встановлюємо біт помилки DHT22
+
+            Serial.println("DHT22 read error");
+        }
+    }
+
+}
